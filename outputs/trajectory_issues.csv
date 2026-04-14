@@ -1,0 +1,12 @@
+stake_id,issue_type,date,details
+EH55,OUTLIER,2023-02-22,15.04 m/day
+EH58,ONLY_ONE_POINT,2022-12-23,single measurement
+EH60,ONLY_ONE_POINT,2022-12-23,single measurement
+EH62,ONLY_ONE_POINT,2022-12-23,single measurement
+EH69,ONLY_ONE_POINT,2022-12-24,single measurement
+EH76,ONLY_ONE_POINT,2025-03-05,single measurement
+EH77,ONLY_ONE_POINT,2025-03-05,single measurement
+EH78,ONLY_ONE_POINT,2025-03-06,single measurement
+EJ55,ONLY_ONE_POINT,2022-12-28,single measurement
+EJ56,ONLY_ONE_POINT,2022-12-27,single measurement
+EJ64,ONLY_ONE_POINT,2025-03-08,single measurement
