@@ -70,7 +70,7 @@ def compute_stake_summary(df, displacements, issues):
 
     return summary
 
-
+# Calculate a mean velocity from valid displacements: First implementation to secure a working version, later upgraded for more accurate predictions.
 def compute_year_summary(df):
 
     rows = []
@@ -101,3 +101,40 @@ def compute_year_summary(df):
             })
 
     return pd.DataFrame(rows).sort_values(["stake_id", "year"])
+
+
+def compute_stake_velocity(displacements):
+
+    rows = []
+
+    for stake_id, group in displacements.groupby("stake_id"):
+
+        group = group.sort_values("date_end")
+
+        total_dx = group["dx"].sum()
+        total_dy = group["dy"].sum()
+        total_dt = group["dt_days"].sum()
+
+        if total_dt == 0 or len(group) == 0:
+            rows.append({
+                "stake_id": stake_id,
+                "vx": None,
+                "vy": None,
+                "v": None,
+                "total_dt": total_dt
+            })
+            continue
+        
+        vx = total_dx / total_dt
+        vy = total_dy / total_dt
+        v = (vx**2 + vy**2)**0.5
+
+        rows.append({
+            "stake_id": stake_id,
+            "vx": vx,
+            "vy": vy,
+            "v": v,
+            "total_dt": total_dt
+        })
+
+    return pd.DataFrame(rows)
