@@ -13,13 +13,11 @@ def compute_stake_summary(df, displacements, issues):
     def has_gap(group):
         years = group["date"].dt.year.unique()
         return set(range(years.min(), years.max() + 1)) != set(years)
-
+    
     gaps = df.groupby("stake_id").apply(has_gap).reset_index(name="has_missing_year")
 
     # detect stakes w/ outliers
-    outlier_stakes = set(
-        issues[issues["issue_type"] == "OUTLIER"]["stake_id"]
-    )
+    outlier_stakes = set(issues[issues["issue_type"] == "OUTLIER"]["stake_id"])
 
     rows = []
 
@@ -27,6 +25,7 @@ def compute_stake_summary(df, displacements, issues):
 
         group = group.sort_values("date_end")
 
+        # if stake has outliers or no segments, set all displacement stats to None
         if stake_id in outlier_stakes or len(group) == 0:
             rows.append({
                 "stake_id": stake_id,
@@ -51,6 +50,7 @@ def compute_stake_summary(df, displacements, issues):
 
         mean_speed = total_distance / total_dt if total_dt > 0 else None
 
+        # normal case: no outliers, at least 2 points
         rows.append({
             "stake_id": stake_id,
             "n_segments": len(group),
