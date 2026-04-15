@@ -11,7 +11,7 @@ trajectories = build_trajectories(df)
 
 displacements, issues = compute_displacements(trajectories)
 
-stakes_summary = compute_stake_summary(df, displacements)
+stakes_summary = compute_stake_summary(df, displacements, issues)
 year_summary = compute_year_summary(df)
 
 export_results(displacements, issues, stakes_summary, year_summary)
