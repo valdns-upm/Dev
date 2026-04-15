@@ -1,4 +1,5 @@
 import pandas as pd
+import numpy as np
 
 def compute_stake_summary(df, displacements, issues):
 
@@ -67,6 +68,9 @@ def compute_stake_summary(df, displacements, issues):
 
     summary = meta.merge(summary_disp, on="stake_id", how="left")
     summary = summary.merge(gaps, on="stake_id", how="left")
+
+    velocity_model = compute_stake_velocity_model(displacements, df, issues)
+    summary = summary.merge(velocity_model, on="stake_id", how="left")
 
     return summary
 
@@ -138,3 +142,74 @@ def compute_stake_velocity(displacements):
         })
 
     return pd.DataFrame(rows)
+
+
+def compute_stake_velocity_model(displacements, df, issues):
+
+    glacier_stats = (
+        displacements.groupby("glacier")[["dx", "dy", "dt_days"]]
+        .sum()
+        .reset_index()
+    )
+
+    glacier_stats["vx"] = glacier_stats["dx"] / glacier_stats["dt_days"]
+    glacier_stats["vy"] = glacier_stats["dy"] / glacier_stats["dt_days"]
+
+    glacier_stats = glacier_stats[["glacier", "vx", "vy"]]
+
+    rows = []
+
+    # Stakes with outlier
+    outlier_stakes = set(issues[issues["issue_type"] == "OUTLIER"]["stake_id"])
+    
+    for stake_id, group in displacements.groupby("stake_id"):
+
+        group = group.sort_values("date_end")
+
+        glacier = group["glacier"].iloc[0]
+
+        total_dx = group["dx"].sum()
+        total_dy = group["dy"].sum()
+        total_dt = group["dt_days"].sum()
+        n_segments = len(group)
+
+        vx, vy = None, None
+        method = "NONE"
+        quality = "NONE"
+
+        #case 1: Stake explotable
+        if stake_id not in outlier_stakes and total_dt > 0 and n_segments >= 2:
+
+            vx = total_dx / total_dt
+            vy = total_dy / total_dt
+            method = "GLOBAL"
+
+            if n_segments >= 10 and total_dt > 365:
+                quality = "HIGH"
+            elif n_segments >= 5:
+                quality = "MEDIUM"
+            else:
+                quality = "LOW"
+
+        #case 2:  glacier average
+        else:
+            gl = glacier_stats[glacier_stats["glacier"] == glacier]
+
+            if len(gl) > 0:
+                vx = gl["vx"].values[0]
+                vy = gl["vy"].values[0]
+                method = "GLACIER_AVERAGE"
+                quality = "LOW"
+        
+        rows.append({
+            "stake_id": stake_id,
+            "vx": vx,
+            "vy": vy,
+            "method": method,
+            "quality": quality,
+            "n_segments": n_segments,
+            "total_dt": total_dt
+        })
+        
+    return pd.DataFrame(rows)
+
