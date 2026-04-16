@@ -22,21 +22,18 @@ def compute_stake_summary(df, displacements, issues):
 
     rows = []
 
-    for stake_id, group in displacements.groupby("stake_id"):
-
-        group = group.sort_values("date_end")
+    for stake_id, meta_group in df.groupby("stake_id"):
+        group = displacements[displacements["stake_id"] == stake_id].sort_values("date_end")
 
         # if stake has outliers or no segments, set all displacement stats to None
         if stake_id in outlier_stakes or len(group) == 0:
             rows.append({
                 "stake_id": stake_id,
-                "n_segments": 0,
-                "total_dx": None,
-                "total_dy": None,
-                "total_dz": None,
-                "total_distance": None,
+                "valid_segments": 0,
+                "total_dx_m": None,
+                "total_dy_m": None,
+                "total_dz_m": None,
                 "total_dt_days": None,
-                "mean_speed_m_per_day": None,
                 "mean_speed_m_per_year": None
             })
             continue
@@ -54,13 +51,11 @@ def compute_stake_summary(df, displacements, issues):
         # normal case: no outliers, at least 2 points
         rows.append({
             "stake_id": stake_id,
-            "n_segments": len(group),
-            "total_dx": total_dx,
-            "total_dy": total_dy,
-            "total_dz": total_dz,
-            "total_distance": total_distance,
+            "valid_segments": len(group),
+            "total_dx_m": total_dx,
+            "total_dy_m": total_dy,
+            "total_dz_m": total_dz,
             "total_dt_days": total_dt,
-            "mean_speed_m_per_day": mean_speed,
             "mean_speed_m_per_year": mean_speed * 365 if mean_speed else None
         })
 
@@ -162,11 +157,10 @@ def compute_stake_velocity_model(displacements, df, issues):
     # Stakes with outlier
     outlier_stakes = set(issues[issues["issue_type"] == "OUTLIER"]["stake_id"])
     
-    for stake_id, group in displacements.groupby("stake_id"):
+    for stake_id, stake_meta in df.groupby("stake_id"):
+        group = displacements[displacements["stake_id"] == stake_id].sort_values("date_end")
 
-        group = group.sort_values("date_end")
-
-        glacier = group["glacier"].iloc[0]
+        glacier = stake_meta["glacier"].iloc[0]
 
         total_dx = group["dx"].sum()
         total_dy = group["dy"].sum()
@@ -203,12 +197,10 @@ def compute_stake_velocity_model(displacements, df, issues):
         
         rows.append({
             "stake_id": stake_id,
-            "vx": vx,
-            "vy": vy,
-            "method": method,
-            "quality": quality,
-            "n_segments": n_segments,
-            "total_dt": total_dt
+            "velocity_vx_m_per_day": vx,
+            "velocity_vy_m_per_day": vy,
+            "velocity_method": method,
+            "velocity_quality": quality
         })
         
     return pd.DataFrame(rows)
