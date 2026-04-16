@@ -76,4 +76,14 @@ def compute_displacements(trajectories):
                 "annualized_speed": segment_speed * 365,
             })
 
-    return pd.DataFrame(rows), pd.DataFrame(issues)
+    displacements = pd.DataFrame(rows)
+    issues_df = pd.DataFrame(issues)
+
+    # If a stake has at least one outlier segment, exclude all its segments from valid displacements.
+    outlier_stakes = set(
+        issues_df.loc[issues_df["issue_type"] == "OUTLIER", "stake_id"].unique()
+    )
+    if outlier_stakes and not displacements.empty:
+        displacements = displacements[~displacements["stake_id"].isin(outlier_stakes)]
+
+    return displacements, issues_df

@@ -1,7 +1,7 @@
 import pandas as pd
 import numpy as np
 
-
+# Main function to compute summary statistics for each stake
 def compute_stake_summary(df, displacements, issues):
 
     # METADATA
@@ -72,7 +72,7 @@ def compute_stake_summary(df, displacements, issues):
 
     return summary
 
-
+# Summarize data availability per year for each stake
 def compute_year_summary(df):
 
     rows = []
@@ -105,6 +105,7 @@ def compute_year_summary(df):
     return pd.DataFrame(rows).sort_values(["stake_id", "year"])
 
 
+# Choose method for velocity calculation depending on data quality/availability
 def compute_stake_velocity_model(displacements, df, issues):
 
     # Glacier-level average velocity
@@ -174,6 +175,7 @@ def compute_stake_velocity_model(displacements, df, issues):
     return pd.DataFrame(rows)
 
 
+# Count number of stakes with data from recent campaigns
 def summarize_recent_campaigns(df, n_campaigns=2):
     campaign_years = sorted(int(year) for year in df["date"].dt.year.dropna().unique())
     recent_campaigns = campaign_years[-n_campaigns:]
