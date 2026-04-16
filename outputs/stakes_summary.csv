@@ -1,4 +1,4 @@
-stake_id,first_date,last_date,n_points,glacier,valid_segments,total_dx_m,total_dy_m,total_dz_m,total_dt_days,mean_speed_m_per_year,has_missing_year,velocity_vx_m_per_day,velocity_vy_m_per_day,velocity_method,velocity_quality
+stake_id,first_date,last_date,n_points,glacier,valid_segments,total_dx_m,total_dy_m,total_dz_m,total_dt_days,mean_speed_m_per_year,has_missing_year,historic_vx_m_per_day,historic_vy_m_per_day,velocity_method,velocity_quality
 EH01,2022-12-23,2025-03-02,5,hurd,4,-0.39647,-0.66006,0.01096,800.00000,0.35130,True,-0.00050,-0.00083,GLOBAL,LOW
 EH02,2022-12-23,2025-03-02,5,hurd,4,-3.82895,-1.75566,1.05124,800.00000,1.92185,True,-0.00479,-0.00219,GLOBAL,LOW
 EH03,2022-12-23,2025-03-02,5,hurd,4,-2.00608,-1.38546,-0.36497,800.00000,1.11234,True,-0.00251,-0.00173,GLOBAL,LOW

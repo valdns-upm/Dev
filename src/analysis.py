@@ -1,8 +1,10 @@
 import pandas as pd
 import numpy as np
 
+
 def compute_stake_summary(df, displacements, issues):
 
+    # METADATA
     meta = df.groupby("stake_id").agg(
         first_date=("date", "min"),
         last_date=("date", "max"),
@@ -10,22 +12,24 @@ def compute_stake_summary(df, displacements, issues):
         glacier=("glacier", "first")
     ).reset_index()
 
-    # detect missing years
+
+    # MISSING YEARS
     def has_gap(group):
         years = group["date"].dt.year.unique()
         return set(range(years.min(), years.max() + 1)) != set(years)
-    
+
     gaps = df.groupby("stake_id").apply(has_gap).reset_index(name="has_missing_year")
 
-    # detect stakes w/ outliers
+    # DISPLACEMENTS SUMMARY
     outlier_stakes = set(issues[issues["issue_type"] == "OUTLIER"]["stake_id"])
 
     rows = []
 
     for stake_id, meta_group in df.groupby("stake_id"):
+
         group = displacements[displacements["stake_id"] == stake_id].sort_values("date_end")
 
-        # if stake has outliers or no segments, set all displacement stats to None
+        # invalid case: outlier or no valid segments
         if stake_id in outlier_stakes or len(group) == 0:
             rows.append({
                 "stake_id": stake_id,
@@ -41,14 +45,11 @@ def compute_stake_summary(df, displacements, issues):
         total_dx = group["dx"].sum()
         total_dy = group["dy"].sum()
         total_dz = group["dz"].sum()
-
         total_dt = group["dt_days"].sum()
 
-        total_distance = (total_dx**2 + total_dy**2)**0.5
-
+        total_distance = np.sqrt(total_dx**2 + total_dy**2)
         mean_speed = total_distance / total_dt if total_dt > 0 else None
 
-        # normal case: no outliers, at least 2 points
         rows.append({
             "stake_id": stake_id,
             "valid_segments": len(group),
@@ -64,12 +65,14 @@ def compute_stake_summary(df, displacements, issues):
     summary = meta.merge(summary_disp, on="stake_id", how="left")
     summary = summary.merge(gaps, on="stake_id", how="left")
 
+    # VELOCITY MODEL
     velocity_model = compute_stake_velocity_model(displacements, df, issues)
+
     summary = summary.merge(velocity_model, on="stake_id", how="left")
 
     return summary
 
-# Calculate a mean velocity from valid displacements: First implementation to secure a working version, later upgraded for more accurate predictions.
+
 def compute_year_summary(df):
 
     rows = []
@@ -102,45 +105,9 @@ def compute_year_summary(df):
     return pd.DataFrame(rows).sort_values(["stake_id", "year"])
 
 
-def compute_stake_velocity(displacements):
-
-    rows = []
-
-    for stake_id, group in displacements.groupby("stake_id"):
-
-        group = group.sort_values("date_end")
-
-        total_dx = group["dx"].sum()
-        total_dy = group["dy"].sum()
-        total_dt = group["dt_days"].sum()
-
-        if total_dt == 0 or len(group) == 0:
-            rows.append({
-                "stake_id": stake_id,
-                "vx": None,
-                "vy": None,
-                "v": None,
-                "total_dt": total_dt
-            })
-            continue
-        
-        vx = total_dx / total_dt
-        vy = total_dy / total_dt
-        v = (vx**2 + vy**2)**0.5
-
-        rows.append({
-            "stake_id": stake_id,
-            "vx": vx,
-            "vy": vy,
-            "v": v,
-            "total_dt": total_dt
-        })
-
-    return pd.DataFrame(rows)
-
-
 def compute_stake_velocity_model(displacements, df, issues):
 
+    # Glacier-level average velocity
     glacier_stats = (
         displacements.groupby("glacier")[["dx", "dy", "dt_days"]]
         .sum()
@@ -152,12 +119,13 @@ def compute_stake_velocity_model(displacements, df, issues):
 
     glacier_stats = glacier_stats[["glacier", "vx", "vy"]]
 
+    # per stake
     rows = []
 
-    # Stakes with outlier
     outlier_stakes = set(issues[issues["issue_type"] == "OUTLIER"]["stake_id"])
-    
+
     for stake_id, stake_meta in df.groupby("stake_id"):
+
         group = displacements[displacements["stake_id"] == stake_id].sort_values("date_end")
 
         glacier = stake_meta["glacier"].iloc[0]
@@ -171,7 +139,7 @@ def compute_stake_velocity_model(displacements, df, issues):
         method = "NONE"
         quality = "NONE"
 
-        #case 1: Stake explotable
+        # GLOBAL CASE: only if not an outlier and has at least 2 valid segments
         if stake_id not in outlier_stakes and total_dt > 0 and n_segments >= 2:
 
             vx = total_dx / total_dt
@@ -185,7 +153,7 @@ def compute_stake_velocity_model(displacements, df, issues):
             else:
                 quality = "LOW"
 
-        #case 2:  glacier average
+        # FALLBACK: if global velocity cannot be computed, use glacier average
         else:
             gl = glacier_stats[glacier_stats["glacier"] == glacier]
 
@@ -194,14 +162,33 @@ def compute_stake_velocity_model(displacements, df, issues):
                 vy = gl["vy"].values[0]
                 method = "GLACIER_AVERAGE"
                 quality = "LOW"
-        
+
         rows.append({
             "stake_id": stake_id,
-            "velocity_vx_m_per_day": vx,
-            "velocity_vy_m_per_day": vy,
+            "historic_vx_m_per_day": vx,
+            "historic_vy_m_per_day": vy,
             "velocity_method": method,
             "velocity_quality": quality
         })
-        
+
     return pd.DataFrame(rows)
 
+
+def summarize_recent_campaigns(df, n_campaigns=2):
+    campaign_years = sorted(int(year) for year in df["date"].dt.year.dropna().unique())
+    recent_campaigns = campaign_years[-n_campaigns:]
+
+    stakes_with_recent_campaigns = (
+        df[df["date"].dt.year.isin(recent_campaigns)]
+        .assign(year=lambda frame: frame["date"].dt.year)
+        .groupby("stake_id")["year"]
+        .nunique()
+        .eq(n_campaigns)
+        .sum()
+    )
+
+    return {
+        "campaign_years": campaign_years,
+        "recent_campaigns": recent_campaigns,
+        "stakes_with_recent_campaigns": stakes_with_recent_campaigns,
+    }
