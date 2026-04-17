@@ -174,6 +174,50 @@ def compute_stake_velocity_model(displacements, df, issues):
 
     return pd.DataFrame(rows)
 
+# Predict future position based on historic velocity model
+def compute_prediction(df, stakes_summary, target_date):
+
+    last_positions = (
+        df.sort_values("date")
+        .groupby("stake_id")
+        .last()
+        .reset_index()
+    )
+
+    # Calculate time difference between last measurement and target date
+    last_positions["delta_t_days"] = (
+        pd.to_datetime(target_date) - last_positions["date"]
+    ).dt.days
+
+    # Merge with velocity model to get historic velocities
+    pred = last_positions.merge(
+        stakes_summary[[
+            "stake_id",
+            "historic_vx_m_per_day",
+            "historic_vy_m_per_day",
+            "velocity_method",
+            "velocity_quality"
+        ]],
+        on="stake_id",
+        how="left"
+    )
+
+    # Predict position at target date with simple linear extrapolation 
+    pred["x_pred"] = pred["x"] + pred["historic_vx_m_per_day"] * pred["delta_t_days"]
+    pred["y_pred"] = pred["y"] + pred["historic_vy_m_per_day"] * pred["delta_t_days"]
+
+    return pred[[
+        "stake_id",
+        "date",
+        "delta_t_days",
+        "x", "y",
+        "x_pred", "y_pred",
+        "historic_vx_m_per_day",
+        "historic_vy_m_per_day",
+        "velocity_method",
+        "velocity_quality"
+    ]]
+
 
 # Count number of stakes with data from recent campaigns
 def summarize_recent_campaigns(df, n_campaigns=2):

@@ -1,4 +1,4 @@
-def export_results(displacements, issues, stakes_summary, year_summary):
+def export_results(displacements, issues, stakes_summary, year_summary, prediction):
 
     displacements.to_csv(
         "outputs/displacements_valid.csv",
@@ -19,5 +19,10 @@ def export_results(displacements, issues, stakes_summary, year_summary):
 
     year_summary.to_csv(
         "outputs/year_summary.csv",
+        index=False
+    )
+
+    prediction.to_csv(
+        "outputs/predictions.csv",
         index=False
     )

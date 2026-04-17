@@ -1,6 +1,6 @@
 from src.io import load_multiple_files
 from src.trajectory import build_trajectories, compute_displacements
-from src.analysis import compute_stake_summary, compute_year_summary, summarize_recent_campaigns
+from src.analysis import compute_prediction, compute_stake_summary, compute_year_summary, summarize_recent_campaigns
 from src.pipeline import export_results
 
 data_path = "data/raw/"
@@ -17,8 +17,12 @@ displacements, issues = compute_displacements(trajectories)
 stakes_summary = compute_stake_summary(df, displacements, issues)
 year_summary = compute_year_summary(df)
 
-export_results(displacements, issues, stakes_summary, year_summary)
+# Change target date for prediction if needed
+predicted_positions = compute_prediction(df, stakes_summary, target_date="2025-12-20")
 
+export_results(displacements, issues, stakes_summary, year_summary, predicted_positions)
+
+# Summary statistics
 print("Number of stakes monitored:", len(stakes_summary))
 print(
     f"Number of stakes with data in the last two campaigns ({campaign_summary['recent_campaigns']}):",
