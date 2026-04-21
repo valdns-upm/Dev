@@ -1,30 +1,40 @@
-README — Estacas
+README - Estacas
 
 Objective
-    Reads Excel files of stake measurements (cf. UPM Drive) for Johnsons & Hurd, and calculates displacements and velocities between successive measurements. 
-    It also flags any problematic data.
+    Read Excel files of stake measurements (Hurd and Johnson), compute cleaned trajectories,
+    estimate historical stake velocity, and project stake positions to a target date.
 
 Input data
-    .xlsx files with the following tabs:
-        Hurd stakes
-        Johnson stakes
-    Columns used: ID, Fecha, X, Y, Z
+    .xlsx files with tabs:
+        Estacas Hurd
+        Estacas Johnsons
+    Columns used: Id. estaca, Fecha, X (E-UTM), Y (N-UTM), Z (WGS84)
 
-Function
-    Automatic reading of all files
-    Data cleaning (dates, missing values...)
-    Reconstruction of trajectories for each stake
-    Calculation of displacements/velocities
-    Detection of problems (missing data, gaps...)
+Workflow
+    Automatic loading of all Excel files (in data/raw/)
+    Date & missing-value cleaning
+    Trajectory reconstruction by stake
+    Segment displacement/speed calculation
+    Point-level outlier handling:
+        Abnormal measurement points are removed
+        Remaining valid points are kept for calculations
+    Velocity model by stake:
+        GLOBAL when enough valid segments exist
+        GLACIER_AVERAGE fallback otherwise
+    Linear position prediction to a target date
 
-Outputs
-    displacements_full.csv
-    → displacements + velocities between two measurements
+Outputs (outputs/)
+    displacements_valid.csv
+    -> valid displacements and segment speeds
     trajectory_issues.csv
-    → detected issues (duplicate dates, long gaps, outliers, etc.)
+    -> detected issues (ONLY_ONE_POINT, DUPLICATE_DATE, OUTLIER)
+    year_summary.csv
+    -> data availability by stake and year
     stakes_summary.csv
-    → summary by stake (number of points, period, gaps)
+    -> summary by stake + historical velocity method/quality
+    predictions.csv
+    -> projected position (x_pred, y_pred) from historic velocity
 
 Notes
-    Dates are standardised (YY → YYYY)
-    Incomplete trajectories are retained
+    Dates are normalized before parsing (dd-mm-yy -> dd-mm-yyyy).
+    Stakes with outliers can still use GLOBAL if enough valid data remains after cleaning.

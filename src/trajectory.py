@@ -21,6 +21,7 @@ def compute_displacements(trajectories):
     max_speed = 5  # m/day
 
     for stake_id, traj in trajectories.items():
+        traj = traj.sort_values("date").reset_index(drop=True)
 
         if len(traj) < 2:
             issues.append({
@@ -31,10 +32,13 @@ def compute_displacements(trajectories):
             })
             continue
 
-        for i in range(1, len(traj)):
-
-            p1 = traj.iloc[i-1]
-            p2 = traj.iloc[i]
+        # Remove individual abnormal measurements (point-level cleaning):
+        # if a segment exceeds max_speed, drop p2 and recompute against the next point.
+        cleaned = traj.copy()
+        i = 1
+        while i < len(cleaned):
+            p1 = cleaned.iloc[i - 1]
+            p2 = cleaned.iloc[i]
 
             dt_days = (p2["date"] - p1["date"]).total_seconds() / 86400
 
@@ -42,15 +46,14 @@ def compute_displacements(trajectories):
                 issues.append({
                     "stake_id": stake_id,
                     "issue_type": "DUPLICATE_DATE",
-                    "date": p1["date"],
+                    "date": p2["date"],
                     "details": "zero time difference"
                 })
+                cleaned = cleaned.drop(index=i).reset_index(drop=True)
                 continue
 
             dx = p2["x"] - p1["x"]
             dy = p2["y"] - p1["y"]
-            dz = p2["z"] - p1["z"]
-
             distance = np.sqrt(dx**2 + dy**2)
             segment_speed = distance / dt_days
 
@@ -61,7 +64,27 @@ def compute_displacements(trajectories):
                     "date": p2["date"],
                     "details": f"{segment_speed:.2f} m/day"
                 })
+                cleaned = cleaned.drop(index=i).reset_index(drop=True)
                 continue
+
+            i += 1
+
+        if len(cleaned) < 2:
+            continue
+
+        for i in range(1, len(cleaned)):
+            p1 = cleaned.iloc[i - 1]
+            p2 = cleaned.iloc[i]
+
+            dt_days = (p2["date"] - p1["date"]).total_seconds() / 86400
+            if dt_days <= 0:
+                continue
+
+            dx = p2["x"] - p1["x"]
+            dy = p2["y"] - p1["y"]
+            dz = p2["z"] - p1["z"]
+            distance = np.sqrt(dx**2 + dy**2)
+            segment_speed = distance / dt_days
 
             rows.append({
                 "stake_id": stake_id,
@@ -76,14 +99,4 @@ def compute_displacements(trajectories):
                 "annualized_speed": segment_speed * 365,
             })
 
-    displacements = pd.DataFrame(rows)
-    issues_df = pd.DataFrame(issues)
-
-    # If a stake has at least one outlier segment, exclude all its segments from valid displacements.
-    outlier_stakes = set(
-        issues_df.loc[issues_df["issue_type"] == "OUTLIER", "stake_id"].unique()
-    )
-    if outlier_stakes and not displacements.empty:
-        displacements = displacements[~displacements["stake_id"].isin(outlier_stakes)]
-
-    return displacements, issues_df
+    return pd.DataFrame(rows), pd.DataFrame(issues)

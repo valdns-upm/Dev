@@ -21,16 +21,14 @@ def compute_stake_summary(df, displacements, issues):
     gaps = df.groupby("stake_id").apply(has_gap).reset_index(name="has_missing_year")
 
     # DISPLACEMENTS SUMMARY
-    outlier_stakes = set(issues[issues["issue_type"] == "OUTLIER"]["stake_id"])
-
     rows = []
 
     for stake_id, meta_group in df.groupby("stake_id"):
 
         group = displacements[displacements["stake_id"] == stake_id].sort_values("date_end")
 
-        # invalid case: outlier or no valid segments
-        if stake_id in outlier_stakes or len(group) == 0:
+        # invalid case: no valid segments after cleaning
+        if len(group) == 0:
             rows.append({
                 "stake_id": stake_id,
                 "valid_segments": 0,
@@ -123,8 +121,6 @@ def compute_stake_velocity_model(displacements, df, issues):
     # per stake
     rows = []
 
-    outlier_stakes = set(issues[issues["issue_type"] == "OUTLIER"]["stake_id"])
-
     for stake_id, stake_meta in df.groupby("stake_id"):
 
         group = displacements[displacements["stake_id"] == stake_id].sort_values("date_end")
@@ -140,8 +136,8 @@ def compute_stake_velocity_model(displacements, df, issues):
         method = "NONE"
         quality = "NONE"
 
-        # GLOBAL CASE: only if not an outlier and has at least 2 valid segments
-        if stake_id not in outlier_stakes and total_dt > 0 and n_segments >= 2:
+        # GLOBAL CASE: use remaining valid segments after cleaning
+        if total_dt > 0 and n_segments >= 2:
 
             vx = total_dx / total_dt
             vy = total_dy / total_dt
