@@ -1,6 +1,73 @@
 import pandas as pd
 import numpy as np
 
+
+def build_glacier_velocity_stats(displacements):
+    glacier_stats = (
+        displacements.groupby("glacier")[["dx", "dy", "dt_days"]]
+        .sum()
+        .reset_index()
+    )
+
+    glacier_stats["vx"] = glacier_stats["dx"] / glacier_stats["dt_days"]
+    glacier_stats["vy"] = glacier_stats["dy"] / glacier_stats["dt_days"]
+
+    return glacier_stats[["glacier", "vx", "vy"]]
+
+
+def estimate_velocity_components(
+    stake_segments,
+    glacier,
+    glacier_stats,
+    reference_date,
+    half_life_days=540,
+):
+    vx_est, vy_est = None, None
+    method = "NONE"
+    quality = "NONE"
+
+    total_dt = stake_segments["dt_days"].sum() if not stake_segments.empty else 0
+    n_segments = len(stake_segments)
+
+    if n_segments >= 2 and total_dt > 0:
+        weighted_segments = stake_segments.copy()
+        weighted_segments["vx"] = weighted_segments["dx"] / weighted_segments["dt_days"]
+        weighted_segments["vy"] = weighted_segments["dy"] / weighted_segments["dt_days"]
+
+        tau = half_life_days / np.log(2)
+        ages = (pd.to_datetime(reference_date) - weighted_segments["date_end"]).dt.days.clip(lower=0)
+        weights = weighted_segments["dt_days"] * np.exp(-ages / tau)
+
+        vx_est = np.average(weighted_segments["vx"], weights=weights)
+        vy_est = np.average(weighted_segments["vy"], weights=weights)
+        method = "WEIGHTED"
+
+        span_days = (
+            weighted_segments["date_end"].max() - weighted_segments["date_start"].min()
+        ).days
+        if n_segments >= 10 and span_days > 365:
+            quality = "HIGH"
+        elif n_segments >= 5:
+            quality = "MEDIUM"
+        else:
+            quality = "LOW"
+    elif n_segments == 1:
+        only_seg = stake_segments.iloc[0]
+        vx_est = only_seg["dx"] / only_seg["dt_days"]
+        vy_est = only_seg["dy"] / only_seg["dt_days"]
+        method = "LAST"
+        quality = "LOW"
+    else:
+        gl = glacier_stats[glacier_stats["glacier"] == glacier]
+        if len(gl) > 0:
+            vx_est = gl["vx"].values[0]
+            vy_est = gl["vy"].values[0]
+            method = "GLACIER"
+            quality = "LOW"
+
+    return vx_est, vy_est, method, quality
+
+
 # Main function to compute summary statistics for each stake
 def compute_stake_summary(df, displacements, issues):
 
@@ -105,18 +172,7 @@ def compute_year_summary(df):
 
 # Choose method for velocity calculation depending on data quality/availability
 def compute_stake_velocity_model(displacements, df, issues):
-
-    # Glacier-level average velocity
-    glacier_stats = (
-        displacements.groupby("glacier")[["dx", "dy", "dt_days"]]
-        .sum()
-        .reset_index()
-    )
-
-    glacier_stats["vx"] = glacier_stats["dx"] / glacier_stats["dt_days"]
-    glacier_stats["vy"] = glacier_stats["dy"] / glacier_stats["dt_days"]
-
-    glacier_stats = glacier_stats[["glacier", "vx", "vy"]]
+    glacier_stats = build_glacier_velocity_stats(displacements)
 
     # per stake
     rows = []
@@ -153,7 +209,6 @@ def compute_stake_velocity_model(displacements, df, issues):
         # FALLBACK: if global velocity cannot be computed, use glacier average
         else:
             gl = glacier_stats[glacier_stats["glacier"] == glacier]
-
             if len(gl) > 0:
                 vx = gl["vx"].values[0]
                 vy = gl["vy"].values[0]
@@ -170,8 +225,8 @@ def compute_stake_velocity_model(displacements, df, issues):
 
     return pd.DataFrame(rows)
 
-# Predict future position based on historic velocity model
-def compute_prediction(df, stakes_summary, target_date):
+# Predict future position using weighted velocity estimation
+def compute_prediction(df, displacements, target_date, half_life_days=540):
 
     last_positions = (
         df.sort_values("date")
@@ -185,34 +240,40 @@ def compute_prediction(df, stakes_summary, target_date):
         pd.to_datetime(target_date) - last_positions["date"]
     ).dt.days
 
-    # Merge with velocity model to get historic velocities
-    pred = last_positions.merge(
-        stakes_summary[[
-            "stake_id",
-            "historic_vx_m_per_day",
-            "historic_vy_m_per_day",
-            "velocity_method",
-            "velocity_quality"
-        ]],
-        on="stake_id",
-        how="left"
-    )
+    glacier_stats = build_glacier_velocity_stats(displacements)
 
-    # Predict position at target date with simple linear extrapolation 
-    pred["x_pred"] = pred["x"] + pred["historic_vx_m_per_day"] * pred["delta_t_days"]
-    pred["y_pred"] = pred["y"] + pred["historic_vy_m_per_day"] * pred["delta_t_days"]
+    rows = []
+    for row in last_positions.itertuples(index=False):
+        stake_segments = displacements[
+            (displacements["stake_id"] == row.stake_id) & (displacements["date_end"] <= row.date)
+        ].sort_values("date_end")
 
-    return pred[[
-        "stake_id",
-        "date",
-        "delta_t_days",
-        "x", "y",
-        "x_pred", "y_pred",
-        "historic_vx_m_per_day",
-        "historic_vy_m_per_day",
-        "velocity_method",
-        "velocity_quality"
-    ]]
+        vx_est, vy_est, method, quality = estimate_velocity_components(
+            stake_segments=stake_segments,
+            glacier=row.glacier,
+            glacier_stats=glacier_stats,
+            reference_date=row.date,
+            half_life_days=half_life_days,
+        )
+
+        x_pred = row.x + vx_est * row.delta_t_days if pd.notna(vx_est) else np.nan
+        y_pred = row.y + vy_est * row.delta_t_days if pd.notna(vy_est) else np.nan
+
+        rows.append({
+            "stake_id": row.stake_id,
+            "date": row.date,
+            "delta_t_days": row.delta_t_days,
+            "x": row.x,
+            "y": row.y,
+            "x_pred": x_pred,
+            "y_pred": y_pred,
+            "vx_est": vx_est,
+            "vy_est": vy_est,
+            "method": method,
+            "quality": quality,
+        })
+
+    return pd.DataFrame(rows)
 
 
 # Count number of stakes with data from recent campaigns
@@ -234,153 +295,3 @@ def summarize_recent_campaigns(df, n_campaigns=2):
         "recent_campaigns": recent_campaigns,
         "stakes_with_recent_campaigns": stakes_with_recent_campaigns,
     }
-
-
-def evaluate_half_lives_with_validation(
-    train_df,
-    validation_df,
-    displacements,
-    stakes_summary,
-    half_lives_days,
-):
-    if validation_df is None or validation_df.empty:
-        return pd.DataFrame(), pd.DataFrame()
-
-    last_train = (
-        train_df.sort_values("date")
-        .groupby("stake_id")
-        .last()
-        .reset_index()[["stake_id", "date", "x", "y"]]
-        .rename(columns={"date": "train_date", "x": "x_train", "y": "y_train"})
-    )
-
-    first_val = (
-        validation_df.sort_values("date")
-        .groupby("stake_id")
-        .first()
-        .reset_index()[["stake_id", "date", "x", "y"]]
-        .rename(columns={"date": "val_date", "x": "x_val", "y": "y_val"})
-    )
-
-    eval_base = last_train.merge(first_val, on="stake_id", how="inner")
-    eval_base = eval_base[eval_base["val_date"] > eval_base["train_date"]].copy()
-    if eval_base.empty:
-        return pd.DataFrame(), pd.DataFrame()
-
-    seg = displacements.copy()
-    if seg.empty:
-        return pd.DataFrame(), pd.DataFrame()
-
-    seg["vx"] = seg["dx"] / seg["dt_days"]
-    seg["vy"] = seg["dy"] / seg["dt_days"]
-
-    fallback = stakes_summary[
-        [
-            "stake_id",
-            "historic_vx_m_per_day",
-            "historic_vy_m_per_day",
-            "velocity_method",
-            "velocity_quality",
-        ]
-    ].copy()
-
-    fallback["velocity_method"] = fallback["velocity_method"].replace(
-        {"GLACIER_AVERAGE": "GLACIER"}
-    )
-
-    fallback_by_stake = fallback.set_index("stake_id").to_dict("index")
-
-    detail_rows = []
-
-    for half_life_days in half_lives_days:
-        tau = half_life_days / np.log(2)
-
-        for row in eval_base.itertuples(index=False):
-            stake_segments = seg[
-                (seg["stake_id"] == row.stake_id) & (seg["date_end"] <= row.train_date)
-            ].copy()
-
-            delta_t_days = (row.val_date - row.train_date).days
-            method = "NONE"
-            quality = "NONE"
-            vx_est = np.nan
-            vy_est = np.nan
-
-            if len(stake_segments) >= 2 and stake_segments["dt_days"].sum() > 0:
-                ages = (row.train_date - stake_segments["date_end"]).dt.days.clip(lower=0)
-                weights = stake_segments["dt_days"] * np.exp(-ages / tau)
-
-                vx_est = np.average(stake_segments["vx"], weights=weights)
-                vy_est = np.average(stake_segments["vy"], weights=weights)
-                method = "WEIGHTED"
-
-                span_days = (stake_segments["date_end"].max() - stake_segments["date_start"].min()).days
-                if len(stake_segments) >= 10 and span_days > 365:
-                    quality = "HIGH"
-                elif len(stake_segments) >= 5:
-                    quality = "MEDIUM"
-                else:
-                    quality = "LOW"
-            elif len(stake_segments) == 1:
-                vx_est = stake_segments["vx"].iloc[0]
-                vy_est = stake_segments["vy"].iloc[0]
-                method = "LAST"
-                quality = "LOW"
-            else:
-                fb = fallback_by_stake.get(row.stake_id)
-                if fb is not None:
-                    vx_est = fb["historic_vx_m_per_day"]
-                    vy_est = fb["historic_vy_m_per_day"]
-                    method = fb["velocity_method"]
-                    quality = fb["velocity_quality"]
-
-            if pd.isna(vx_est) or pd.isna(vy_est):
-                continue
-
-            x_pred = row.x_train + vx_est * delta_t_days
-            y_pred = row.y_train + vy_est * delta_t_days
-
-            err_x = x_pred - row.x_val
-            err_y = y_pred - row.y_val
-            err_dist = float(np.sqrt(err_x**2 + err_y**2))
-
-            detail_rows.append({
-                "half_life_days": half_life_days,
-                "stake_id": row.stake_id,
-                "train_date": row.train_date,
-                "val_date": row.val_date,
-                "delta_t_days": delta_t_days,
-                "x_train": row.x_train,
-                "y_train": row.y_train,
-                "x_val": row.x_val,
-                "y_val": row.y_val,
-                "vx_est": vx_est,
-                "vy_est": vy_est,
-                "method": method,
-                "quality": quality,
-                "x_pred": x_pred,
-                "y_pred": y_pred,
-                "err_x_m": err_x,
-                "err_y_m": err_y,
-                "err_dist_m": err_dist,
-            })
-
-    details = pd.DataFrame(detail_rows)
-    if details.empty:
-        return pd.DataFrame(), pd.DataFrame()
-
-    summary = (
-        details.groupby("half_life_days")
-        .agg(
-            n_stakes=("stake_id", "nunique"),
-            mean_abs_err_x_m=("err_x_m", lambda s: s.abs().mean()),
-            mean_abs_err_y_m=("err_y_m", lambda s: s.abs().mean()),
-            mean_err_dist_m=("err_dist_m", "mean"),
-            rmse_dist_m=("err_dist_m", lambda s: float(np.sqrt(np.mean(np.square(s))))),
-            median_err_dist_m=("err_dist_m", "median"),
-        )
-        .reset_index()
-        .sort_values("half_life_days")
-    )
-
-    return summary, details
