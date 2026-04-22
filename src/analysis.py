@@ -234,3 +234,153 @@ def summarize_recent_campaigns(df, n_campaigns=2):
         "recent_campaigns": recent_campaigns,
         "stakes_with_recent_campaigns": stakes_with_recent_campaigns,
     }
+
+
+def evaluate_half_lives_with_validation(
+    train_df,
+    validation_df,
+    displacements,
+    stakes_summary,
+    half_lives_days,
+):
+    if validation_df is None or validation_df.empty:
+        return pd.DataFrame(), pd.DataFrame()
+
+    last_train = (
+        train_df.sort_values("date")
+        .groupby("stake_id")
+        .last()
+        .reset_index()[["stake_id", "date", "x", "y"]]
+        .rename(columns={"date": "train_date", "x": "x_train", "y": "y_train"})
+    )
+
+    first_val = (
+        validation_df.sort_values("date")
+        .groupby("stake_id")
+        .first()
+        .reset_index()[["stake_id", "date", "x", "y"]]
+        .rename(columns={"date": "val_date", "x": "x_val", "y": "y_val"})
+    )
+
+    eval_base = last_train.merge(first_val, on="stake_id", how="inner")
+    eval_base = eval_base[eval_base["val_date"] > eval_base["train_date"]].copy()
+    if eval_base.empty:
+        return pd.DataFrame(), pd.DataFrame()
+
+    seg = displacements.copy()
+    if seg.empty:
+        return pd.DataFrame(), pd.DataFrame()
+
+    seg["vx"] = seg["dx"] / seg["dt_days"]
+    seg["vy"] = seg["dy"] / seg["dt_days"]
+
+    fallback = stakes_summary[
+        [
+            "stake_id",
+            "historic_vx_m_per_day",
+            "historic_vy_m_per_day",
+            "velocity_method",
+            "velocity_quality",
+        ]
+    ].copy()
+
+    fallback["velocity_method"] = fallback["velocity_method"].replace(
+        {"GLACIER_AVERAGE": "GLACIER"}
+    )
+
+    fallback_by_stake = fallback.set_index("stake_id").to_dict("index")
+
+    detail_rows = []
+
+    for half_life_days in half_lives_days:
+        tau = half_life_days / np.log(2)
+
+        for row in eval_base.itertuples(index=False):
+            stake_segments = seg[
+                (seg["stake_id"] == row.stake_id) & (seg["date_end"] <= row.train_date)
+            ].copy()
+
+            delta_t_days = (row.val_date - row.train_date).days
+            method = "NONE"
+            quality = "NONE"
+            vx_est = np.nan
+            vy_est = np.nan
+
+            if len(stake_segments) >= 2 and stake_segments["dt_days"].sum() > 0:
+                ages = (row.train_date - stake_segments["date_end"]).dt.days.clip(lower=0)
+                weights = stake_segments["dt_days"] * np.exp(-ages / tau)
+
+                vx_est = np.average(stake_segments["vx"], weights=weights)
+                vy_est = np.average(stake_segments["vy"], weights=weights)
+                method = "WEIGHTED"
+
+                span_days = (stake_segments["date_end"].max() - stake_segments["date_start"].min()).days
+                if len(stake_segments) >= 10 and span_days > 365:
+                    quality = "HIGH"
+                elif len(stake_segments) >= 5:
+                    quality = "MEDIUM"
+                else:
+                    quality = "LOW"
+            elif len(stake_segments) == 1:
+                vx_est = stake_segments["vx"].iloc[0]
+                vy_est = stake_segments["vy"].iloc[0]
+                method = "LAST"
+                quality = "LOW"
+            else:
+                fb = fallback_by_stake.get(row.stake_id)
+                if fb is not None:
+                    vx_est = fb["historic_vx_m_per_day"]
+                    vy_est = fb["historic_vy_m_per_day"]
+                    method = fb["velocity_method"]
+                    quality = fb["velocity_quality"]
+
+            if pd.isna(vx_est) or pd.isna(vy_est):
+                continue
+
+            x_pred = row.x_train + vx_est * delta_t_days
+            y_pred = row.y_train + vy_est * delta_t_days
+
+            err_x = x_pred - row.x_val
+            err_y = y_pred - row.y_val
+            err_dist = float(np.sqrt(err_x**2 + err_y**2))
+
+            detail_rows.append({
+                "half_life_days": half_life_days,
+                "stake_id": row.stake_id,
+                "train_date": row.train_date,
+                "val_date": row.val_date,
+                "delta_t_days": delta_t_days,
+                "x_train": row.x_train,
+                "y_train": row.y_train,
+                "x_val": row.x_val,
+                "y_val": row.y_val,
+                "vx_est": vx_est,
+                "vy_est": vy_est,
+                "method": method,
+                "quality": quality,
+                "x_pred": x_pred,
+                "y_pred": y_pred,
+                "err_x_m": err_x,
+                "err_y_m": err_y,
+                "err_dist_m": err_dist,
+            })
+
+    details = pd.DataFrame(detail_rows)
+    if details.empty:
+        return pd.DataFrame(), pd.DataFrame()
+
+    summary = (
+        details.groupby("half_life_days")
+        .agg(
+            n_stakes=("stake_id", "nunique"),
+            mean_abs_err_x_m=("err_x_m", lambda s: s.abs().mean()),
+            mean_abs_err_y_m=("err_y_m", lambda s: s.abs().mean()),
+            mean_err_dist_m=("err_dist_m", "mean"),
+            rmse_dist_m=("err_dist_m", lambda s: float(np.sqrt(np.mean(np.square(s))))),
+            median_err_dist_m=("err_dist_m", "median"),
+        )
+        .reset_index()
+        .sort_values("half_life_days")
+    )
+
+    return summary, details
