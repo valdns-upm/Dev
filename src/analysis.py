@@ -19,8 +19,6 @@ def estimate_velocity_components(
     stake_segments,
     glacier,
     glacier_stats,
-    reference_date,
-    half_life_days=540,
 ):
     vx_est, vy_est = None, None
     method = "NONE"
@@ -29,34 +27,27 @@ def estimate_velocity_components(
     total_dt = stake_segments["dt_days"].sum() if not stake_segments.empty else 0
     n_segments = len(stake_segments)
 
+    # Priority 1: GLOBAL
     if n_segments >= 2 and total_dt > 0:
-        weighted_segments = stake_segments.copy()
-        weighted_segments["vx"] = weighted_segments["dx"] / weighted_segments["dt_days"]
-        weighted_segments["vy"] = weighted_segments["dy"] / weighted_segments["dt_days"]
+        vx_est = stake_segments["dx"].sum() / total_dt
+        vy_est = stake_segments["dy"].sum() / total_dt
+        method = "GLOBAL"
 
-        tau = half_life_days / np.log(2)
-        ages = (pd.to_datetime(reference_date) - weighted_segments["date_end"]).dt.days.clip(lower=0)
-        weights = weighted_segments["dt_days"] * np.exp(-ages / tau)
-
-        vx_est = np.average(weighted_segments["vx"], weights=weights)
-        vy_est = np.average(weighted_segments["vy"], weights=weights)
-        method = "WEIGHTED"
-
-        span_days = (
-            weighted_segments["date_end"].max() - weighted_segments["date_start"].min()
-        ).days
+        span_days = (stake_segments["date_end"].max() - stake_segments["date_start"].min()).days
         if n_segments >= 10 and span_days > 365:
             quality = "HIGH"
         elif n_segments >= 5:
             quality = "MEDIUM"
         else:
             quality = "LOW"
+    # Priority 2: LAST
     elif n_segments == 1:
         only_seg = stake_segments.iloc[0]
         vx_est = only_seg["dx"] / only_seg["dt_days"]
         vy_est = only_seg["dy"] / only_seg["dt_days"]
         method = "LAST"
         quality = "LOW"
+    # Priority 3: GLACIER
     else:
         gl = glacier_stats[glacier_stats["glacier"] == glacier]
         if len(gl) > 0:
@@ -182,38 +173,11 @@ def compute_stake_velocity_model(displacements, df, issues):
         group = displacements[displacements["stake_id"] == stake_id].sort_values("date_end")
 
         glacier = stake_meta["glacier"].iloc[0]
-
-        total_dx = group["dx"].sum()
-        total_dy = group["dy"].sum()
-        total_dt = group["dt_days"].sum()
-        n_segments = len(group)
-
-        vx, vy = None, None
-        method = "NONE"
-        quality = "NONE"
-
-        # GLOBAL CASE: use remaining valid segments after cleaning
-        if total_dt > 0 and n_segments >= 2:
-
-            vx = total_dx / total_dt
-            vy = total_dy / total_dt
-            method = "GLOBAL"
-
-            if n_segments >= 10 and total_dt > 365:
-                quality = "HIGH"
-            elif n_segments >= 5:
-                quality = "MEDIUM"
-            else:
-                quality = "LOW"
-
-        # FALLBACK: if global velocity cannot be computed, use glacier average
-        else:
-            gl = glacier_stats[glacier_stats["glacier"] == glacier]
-            if len(gl) > 0:
-                vx = gl["vx"].values[0]
-                vy = gl["vy"].values[0]
-                method = "GLACIER_AVERAGE"
-                quality = "LOW"
+        vx, vy, method, quality = estimate_velocity_components(
+            stake_segments=group,
+            glacier=glacier,
+            glacier_stats=glacier_stats,
+        )
 
         rows.append({
             "stake_id": stake_id,
@@ -225,8 +189,8 @@ def compute_stake_velocity_model(displacements, df, issues):
 
     return pd.DataFrame(rows)
 
-# Predict future position using weighted velocity estimation
-def compute_prediction(df, displacements, target_date, half_life_days=540):
+# Predict future position using the same shared velocity logic as the summary
+def compute_prediction(df, displacements, target_date):
 
     last_positions = (
         df.sort_values("date")
@@ -252,8 +216,6 @@ def compute_prediction(df, displacements, target_date, half_life_days=540):
             stake_segments=stake_segments,
             glacier=row.glacier,
             glacier_stats=glacier_stats,
-            reference_date=row.date,
-            half_life_days=half_life_days,
         )
 
         x_pred = row.x + vx_est * row.delta_t_days if pd.notna(vx_est) else np.nan

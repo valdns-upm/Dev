@@ -37,12 +37,12 @@ def export_results(
 
     if validation_summary is not None and not validation_summary.empty:
         validation_summary.to_csv(
-            "outputs/validation_half_life_summary.csv",
+            "outputs/validation_summary.csv",
             index=False
         )
 
     if validation_details is not None and not validation_details.empty:
         validation_details.to_csv(
-            "outputs/validation_half_life_details.csv",
+            "outputs/validation_details.csv",
             index=False
         )

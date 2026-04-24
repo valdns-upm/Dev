@@ -19,9 +19,11 @@ Workflow
         Abnormal measurement points are removed
         Remaining valid points are kept for calculations
     Velocity model by stake:
-        GLOBAL when enough valid segments exist
-        GLACIER_AVERAGE fallback otherwise
+        method priority = GLOBAL -> LAST -> GLACIER
+    Future velocity estimate for prediction:
+        same method priority = GLOBAL -> LAST -> GLACIER
     Linear position prediction to a target date
+    Optional validation on files in data/validation/, enabled manually in main.py with run_validation = True
 
 Outputs (outputs/)
     displacements_valid.csv
@@ -34,6 +36,10 @@ Outputs (outputs/)
     -> summary by stake + historical velocity method/quality
     predictions.csv
     -> projected position (x_pred, y_pred) from historic velocity
+    validation_summary.csv
+    -> aggregate prediction errors on validation data
+    validation_details.csv
+    -> per-stake validation prediction errors
 
 Notes
     Dates are normalized before parsing (dd-mm-yy -> dd-mm-yyyy).

@@ -6,20 +6,18 @@ from src.analysis import (
     compute_year_summary,
     summarize_recent_campaigns,
 )
-from src.validation import evaluate_half_lives_with_validation
+from src.validation import evaluate_prediction_with_validation
 from src.pipeline import export_results
 from pathlib import Path
 
 data_path = "data/raw/"
 validation_path = "data/validation/"
-prediction_half_life_days = 540
+run_validation = False
 
 df = load_multiple_files(data_path)
 campaign_summary = summarize_recent_campaigns(df, n_campaigns=2)
 
 trajectories = build_trajectories(df)
-
-# Compute displacements and identify issues
 displacements, issues = compute_displacements(trajectories)
 
 # Compute summaries
@@ -31,20 +29,20 @@ predicted_positions = compute_prediction(
     df,
     displacements,
     target_date="2025-12-20",
-    half_life_days=prediction_half_life_days,
 )
 
+# Optional validation
 validation_summary = None
 validation_details = None
-if any(Path(validation_path).glob("*.xlsx")):
+if run_validation and any(Path(validation_path).glob("*.xlsx")):
     validation_df = load_multiple_files(validation_path)
-    validation_half_lives = [180, 365, 540, 730]
-    validation_summary, validation_details = evaluate_half_lives_with_validation(
+    validation_summary, validation_details = evaluate_prediction_with_validation(
         train_df=df,
         validation_df=validation_df,
         displacements=displacements,
-        half_lives_days=validation_half_lives,
     )
+elif run_validation:
+    print(f"Validation requested, but no .xlsx files were found in {validation_path}")
 
 export_results(
     displacements,
@@ -64,8 +62,7 @@ print(
 )
 print("Number of stakes with one measurement:", (stakes_summary["n_points"] == 1).sum())
 print("Number of stakes with outliers:", issues.loc[issues["issue_type"] == "OUTLIER", "stake_id"].nunique())
-print("Prediction half-life used:", prediction_half_life_days, "days")
 if validation_summary is not None and not validation_summary.empty:
-    best = validation_summary.sort_values("rmse_dist_m").iloc[0]
-    print("Validation half-lives tested:", len(validation_summary))
-    print("Best half-life (by RMSE distance):", int(best["half_life_days"]), "days")
+    metrics = validation_summary.iloc[0]
+    print("Validation stakes compared:", int(metrics["n_stakes"]))
+    print("Validation RMSE distance:", round(float(metrics["rmse_dist_m"]), 4), "m")
