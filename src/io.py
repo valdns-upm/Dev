@@ -67,14 +67,29 @@ def clean_stakes_df(df):
     return df
 
 
+def infer_campaign_from_file(file_path):
+    file_name = Path(file_path).name
+    match = re.search(r"estacas(\d{2})(\d{2})([a-z]?)", file_name, flags=re.IGNORECASE)
+
+    if match:
+        start_year = 2000 + int(match.group(1))
+        end_year = 2000 + int(match.group(2))
+        return f"{start_year}-{end_year}"
+
+    return None
+
+
 def load_single_file(file_path):
     sheets = ["Estacas Hurd", "Estacas Johnsons"]
+    campaign_label = infer_campaign_from_file(file_path)
 
     dfs = []
 
     for sheet in sheets:
         df_raw = read_stakes_sheet(file_path, sheet)
         df_clean = clean_stakes_df(df_raw)
+        df_clean["source_file"] = Path(file_path).name
+        df_clean["campaign"] = campaign_label
         dfs.append(df_clean)
 
     return pd.concat(dfs, ignore_index=True)

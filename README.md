@@ -26,12 +26,12 @@ Workflow
     Optional validation on files in data/validation/, enabled manually in main.py with run_validation = True
 
 Outputs (outputs/)
-    displacements_valid.csv
+    displacements_list.csv
     -> valid displacements and segment speeds
     trajectory_issues.csv
     -> detected issues (ONLY_ONE_POINT, DUPLICATE_DATE, OUTLIER)
-    year_summary.csv
-    -> data availability by stake and year
+    campaign_summary.csv
+    -> data availability by stake and campaign
     stakes_summary.csv
     -> summary by stake + historical velocity method/quality
     predictions.csv

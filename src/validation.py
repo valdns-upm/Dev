@@ -1,7 +1,7 @@
 import pandas as pd
 import numpy as np
 
-from src.analysis import build_glacier_velocity_stats, estimate_velocity_components
+from src.analysis import estimate_velocity_components
 
 
 def evaluate_prediction_with_validation(
@@ -12,75 +12,70 @@ def evaluate_prediction_with_validation(
     if validation_df is None or validation_df.empty:
         return pd.DataFrame(), pd.DataFrame()
 
-    last_train = (
+    last_start = (
         train_df.sort_values("date")
         .groupby("stake_id")
         .last()
         .reset_index()[["stake_id", "date", "x", "y", "glacier"]]
         .rename(
             columns={
-                "date": "train_date",
-                "x": "x_train",
-                "y": "y_train",
+                "date": "start_date",
+                "x": "x_start",
+                "y": "y_start",
             }
         )
     )
 
-    first_val = (
+    first_obs = (
         validation_df.sort_values("date")
         .groupby("stake_id")
         .first()
         .reset_index()[["stake_id", "date", "x", "y"]]
-        .rename(columns={"date": "val_date", "x": "x_val", "y": "y_val"})
+        .rename(columns={"date": "obs_date", "x": "x_obs", "y": "y_obs"})
     )
 
-    eval_base = last_train.merge(first_val, on="stake_id", how="inner")
-    eval_base = eval_base[eval_base["val_date"] > eval_base["train_date"]].copy()
+    eval_base = last_start.merge(first_obs, on="stake_id", how="inner")
+    eval_base = eval_base[eval_base["obs_date"] > eval_base["start_date"]].copy()
     if eval_base.empty:
         return pd.DataFrame(), pd.DataFrame()
 
     if displacements.empty:
         return pd.DataFrame(), pd.DataFrame()
 
-    glacier_stats = build_glacier_velocity_stats(displacements)
     detail_rows = []
 
     for row in eval_base.itertuples(index=False):
         stake_segments = displacements[
             (displacements["stake_id"] == row.stake_id)
-            & (displacements["date_end"] <= row.train_date)
+            & (displacements["date_end"] <= row.start_date)
         ].sort_values("date_end")
 
-        delta_t_days = (row.val_date - row.train_date).days
-        vx_est, vy_est, method, quality = estimate_velocity_components(
+        delta_t_days = (row.obs_date - row.start_date).days
+        vx_est, vy_est = estimate_velocity_components(
             stake_segments=stake_segments,
-            glacier=row.glacier,
-            glacier_stats=glacier_stats,
         )
 
         if pd.isna(vx_est) or pd.isna(vy_est):
             continue
 
-        x_pred = row.x_train + vx_est * delta_t_days
-        y_pred = row.y_train + vy_est * delta_t_days
+        x_pred = row.x_start + vx_est * delta_t_days
+        y_pred = row.y_start + vy_est * delta_t_days
 
-        err_x = x_pred - row.x_val
-        err_y = y_pred - row.y_val
+        err_x = x_pred - row.x_obs
+        err_y = y_pred - row.y_obs
         err_dist = float(np.sqrt(err_x**2 + err_y**2))
 
         detail_rows.append({
             "stake_id": row.stake_id,
-            "train_date": row.train_date,
-            "val_date": row.val_date,
+            "start_date": row.start_date,
+            "obs_date": row.obs_date,
             "delta_t_days": delta_t_days,
-            "x_train": row.x_train,
-            "y_train": row.y_train,
-            "x_val": row.x_val,
-            "y_val": row.y_val,
+            "x_start": row.x_start,
+            "y_start": row.y_start,
+            "x_obs": row.x_obs,
+            "y_obs": row.y_obs,
             "vx_est": vx_est,
             "vy_est": vy_est,
-            "method": method,
-            "quality": quality,
             "x_pred": x_pred,
             "y_pred": y_pred,
             "err_x_m": err_x,

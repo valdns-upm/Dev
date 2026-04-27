@@ -3,7 +3,7 @@ from src.trajectory import build_trajectories, compute_displacements
 from src.analysis import (
     compute_prediction,
     compute_stake_summary,
-    compute_year_summary,
+    compute_campaign_summary,
     summarize_recent_campaigns,
 )
 from src.validation import evaluate_prediction_with_validation
@@ -12,17 +12,19 @@ from pathlib import Path
 
 data_path = "data/raw/"
 validation_path = "data/validation/"
+
+# Setting to change:
 run_validation = True
 
 df = load_multiple_files(data_path)
-campaign_summary = summarize_recent_campaigns(df, n_campaigns=2)
+recent_campaigns_summary = summarize_recent_campaigns(df, n_campaigns=2)
 
 trajectories = build_trajectories(df)
 displacements, issues = compute_displacements(trajectories)
 
 # Compute summaries
-stakes_summary = compute_stake_summary(df, displacements, issues)
-year_summary = compute_year_summary(df)
+stakes_summary = compute_stake_summary(df, displacements)
+campaign_summary = compute_campaign_summary(df)
 
 # Change target date for prediction if needed
 predicted_positions = compute_prediction(
@@ -48,7 +50,7 @@ export_results(
     displacements,
     issues,
     stakes_summary,
-    year_summary,
+    campaign_summary,
     predicted_positions,
     validation_summary=validation_summary,
     validation_details=validation_details,
@@ -57,11 +59,12 @@ export_results(
 # Summary statistics
 print("Number of stakes monitored:", len(stakes_summary))
 print(
-    f"Number of stakes with data in the last two campaigns ({campaign_summary['recent_campaigns']}):",
-    campaign_summary["stakes_with_recent_campaigns"],
+    f"Number of stakes with data in the last two campaigns ({recent_campaigns_summary['recent_campaigns']}):",
+    recent_campaigns_summary["stakes_with_recent_campaigns"],
 )
 print("Number of stakes with one measurement:", (stakes_summary["n_points"] == 1).sum())
 print("Number of stakes with outliers:", issues.loc[issues["issue_type"] == "OUTLIER", "stake_id"].nunique())
+
 if validation_summary is not None and not validation_summary.empty:
     metrics = validation_summary.iloc[0]
     print("Validation stakes compared:", int(metrics["n_stakes"]))
