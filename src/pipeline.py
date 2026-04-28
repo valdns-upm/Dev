@@ -46,16 +46,16 @@ def export_results(
     if "mean_speed_m_per_year" in stakes_export.columns:
         stakes_export["mean_speed_m_per_year"] = stakes_export["mean_speed_m_per_year"].round(2)
 
-    round_5_columns = [
-        "total_dx_m",
-        "total_dy_m",
-        "total_dz_m",
-        "historic_vx_m_per_day",
-        "historic_vy_m_per_day",
-    ]
-    existing_round_5_columns = [col for col in round_5_columns if col in stakes_export.columns]
-    if existing_round_5_columns:
-        stakes_export[existing_round_5_columns] = stakes_export[existing_round_5_columns].round(5)
+    _round_existing_columns(
+        stakes_export,
+        ["total_dx_m", "total_dy_m"],
+        decimals=3,
+    )
+    _round_existing_columns(
+        stakes_export,
+        ["total_dz_m", "historic_vx_m_per_day", "historic_vy_m_per_day"],
+        decimals=5,
+    )
 
     stakes_export.to_csv(
         "outputs/stakes_summary.csv",
@@ -87,7 +87,20 @@ def export_results(
     validation_details_path = Path("outputs/validation_details.csv")
 
     if validation_summary is not None and not validation_summary.empty:
-        validation_summary.to_csv(
+        validation_summary_export = validation_summary.copy()
+        _round_existing_columns(
+            validation_summary_export,
+            [
+                "mean_abs_err_x_m",
+                "mean_abs_err_y_m",
+                "mean_err_dist_m",
+                "rmse_dist_m",
+                "median_err_dist_m",
+            ],
+            decimals=3,
+        )
+
+        validation_summary_export.to_csv(
             validation_summary_path,
             index=False
         )

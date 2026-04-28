@@ -14,7 +14,7 @@ data_path = "data/raw/"
 validation_path = "data/validation/"
 
 # Setting to change:
-run_validation = True
+run_validation = False
 
 df = load_multiple_files(data_path)
 recent_campaigns_summary = summarize_recent_campaigns(df, n_campaigns=2)
