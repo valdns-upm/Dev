@@ -1,8 +1,6 @@
 from pathlib import Path
 
-
 DEFAULT_CRS = "EPSG:32720"
-
 
 def _load_geospatial_dependencies():
     try:
@@ -14,25 +12,30 @@ def _load_geospatial_dependencies():
         ) from exc
 
     try:
-        from shapely.geometry import LineString
+        from shapely.geometry import LineString, Point
     except ImportError as exc:
         raise ImportError(
             "GeoPackage export requires shapely."
         ) from exc
 
-    return gpd, LineString
+    return gpd, LineString, Point
 
 
 def _empty_geodataframe(columns, crs):
-    gpd, _ = _load_geospatial_dependencies()
+    gpd, _, _ = _load_geospatial_dependencies()
     return gpd.GeoDataFrame(columns=columns, geometry="geometry", crs=crs)
 
 
-def build_historic_layer(cleaned_trajectories, stakes_summary, crs=DEFAULT_CRS):
-    gpd, LineString = _load_geospatial_dependencies()
+def build_historic_layer(cleaned_trajectories, stakes_summary, prediction, crs=DEFAULT_CRS):
+    gpd, LineString, _ = _load_geospatial_dependencies()
+    predicted_stake_ids = set(
+        prediction.loc[prediction["prediction_status"] == "predicted", "stake_id"]
+    )
 
     records = []
     for stake_id, trajectory in cleaned_trajectories.items():
+        if stake_id not in predicted_stake_ids:
+            continue
         if trajectory is None or trajectory.empty:
             continue
 
@@ -65,7 +68,7 @@ def build_historic_layer(cleaned_trajectories, stakes_summary, crs=DEFAULT_CRS):
 
 
 def build_predictions_layer(prediction, crs=DEFAULT_CRS):
-    gpd, LineString = _load_geospatial_dependencies()
+    gpd, LineString, _ = _load_geospatial_dependencies()
 
     prediction_layer = prediction.dropna(
         subset=["x", "y", "x_pred", "y_pred"]
@@ -86,8 +89,26 @@ def build_predictions_layer(prediction, crs=DEFAULT_CRS):
     return gpd.GeoDataFrame(prediction_layer, geometry="geometry", crs=crs)
 
 
+def build_unpredicted_points_layer(prediction, crs=DEFAULT_CRS):
+    gpd, _, Point = _load_geospatial_dependencies()
+
+    points_layer = prediction[
+        prediction["prediction_status"] == "unpredicted"
+    ].dropna(subset=["x", "y"]).copy()
+
+    if points_layer.empty:
+        return _empty_geodataframe(list(prediction.columns) + ["geometry"], crs)
+
+    points_layer["geometry"] = points_layer.apply(
+        lambda row: Point(row["x"], row["y"]),
+        axis=1,
+    )
+
+    return gpd.GeoDataFrame(points_layer, geometry="geometry", crs=crs)
+
+
 def build_validation_layer(validation_details, crs=DEFAULT_CRS):
-    gpd, LineString = _load_geospatial_dependencies()
+    gpd, LineString, _ = _load_geospatial_dependencies()
 
     if validation_details is None or validation_details.empty:
         return _empty_geodataframe(["geometry"], crs)
@@ -118,8 +139,9 @@ def export_geopackage(
     crs=DEFAULT_CRS,
 ):
     layers = [
-        ("historic", build_historic_layer(cleaned_trajectories, stakes_summary, crs=crs)),
+        ("historic", build_historic_layer(cleaned_trajectories, stakes_summary, prediction, crs=crs)),
         ("predictions", build_predictions_layer(prediction, crs=crs)),
+        ("unpredicted_points", build_unpredicted_points_layer(prediction, crs=crs)),
         ("validation", build_validation_layer(validation_details, crs=crs)),
     ]
     layers = [(name, layer) for name, layer in layers if not layer.empty]
