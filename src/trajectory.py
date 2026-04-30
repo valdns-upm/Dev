@@ -17,6 +17,7 @@ def compute_displacements(trajectories):
 
     rows = []
     issues = []
+    cleaned_trajectories = {}
 
     max_speed = 5  # m/day
 
@@ -24,6 +25,7 @@ def compute_displacements(trajectories):
         traj = traj.sort_values("date").reset_index(drop=True)
 
         if len(traj) < 2:
+            cleaned_trajectories[stake_id] = traj.copy()
             issues.append({
                 "stake_id": stake_id,
                 "issue_type": "ONLY_ONE_POINT",
@@ -69,6 +71,8 @@ def compute_displacements(trajectories):
 
             i += 1
 
+        cleaned_trajectories[stake_id] = cleaned.copy()
+
         if len(cleaned) < 2:
             continue
 
@@ -99,4 +103,4 @@ def compute_displacements(trajectories):
                 "annualized_speed": segment_speed * 365,
             })
 
-    return pd.DataFrame(rows), pd.DataFrame(issues)
+    return cleaned_trajectories, pd.DataFrame(rows), pd.DataFrame(issues)

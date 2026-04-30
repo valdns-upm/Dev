@@ -1,4 +1,4 @@
-from src.io import load_multiple_files
+from src.io import load_monitoring_metadata, load_multiple_files
 from src.trajectory import build_trajectories, compute_displacements
 from src.analysis import (
     compute_prediction,
@@ -14,13 +14,14 @@ data_path = "data/raw/"
 validation_path = "data/validation/"
 
 # Setting to change:
-run_validation = False
+run_validation = True
 
 df = load_multiple_files(data_path)
+monitoring_df = load_monitoring_metadata(data_path)
 recent_campaigns_summary = summarize_recent_campaigns(df, n_campaigns=2)
 
 trajectories = build_trajectories(df)
-displacements, issues = compute_displacements(trajectories)
+cleaned_trajectories, displacements, issues = compute_displacements(trajectories)
 
 # Compute summaries
 stakes_summary = compute_stake_summary(df, displacements)
@@ -31,6 +32,7 @@ predicted_positions = compute_prediction(
     df,
     displacements,
     target_date="2025-12-20",
+    monitoring_df=monitoring_df,
 )
 
 # Optional validation
@@ -47,6 +49,7 @@ elif run_validation:
     print(f"Validation requested, but no .xlsx files were found in {validation_path}")
 
 export_results(
+    cleaned_trajectories,
     displacements,
     issues,
     stakes_summary,

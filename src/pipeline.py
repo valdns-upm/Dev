@@ -1,5 +1,7 @@
 from pathlib import Path
 
+from src.geospatial import export_geopackage
+
 
 def _round_existing_columns(df, columns, decimals):
     existing_columns = [col for col in columns if col in df.columns]
@@ -8,6 +10,7 @@ def _round_existing_columns(df, columns, decimals):
 
 
 def export_results(
+    cleaned_trajectories,
     displacements,
     issues,
     stakes_summary,
@@ -16,6 +19,9 @@ def export_results(
     validation_summary=None,
     validation_details=None,
 ):
+    legacy_stakes_summary_path = Path("outputs/stakes_summary.csv")
+    stake_historic_path = Path("outputs/stake_historic.csv")
+
     displacements_export = displacements.drop(
         columns=["annualized_speed"],
         errors="ignore"
@@ -57,10 +63,9 @@ def export_results(
         decimals=5,
     )
 
-    stakes_export.to_csv(
-        "outputs/stakes_summary.csv",
-        index=False
-    )
+    stakes_export.to_csv(stake_historic_path, index=False)
+    if legacy_stakes_summary_path.exists():
+        legacy_stakes_summary_path.unlink()
 
     campaign_summary.to_csv(
         "outputs/campaign_summary.csv",
@@ -130,3 +135,10 @@ def export_results(
         )
     elif validation_details_path.exists():
         validation_details_path.unlink()
+
+    export_geopackage(
+        cleaned_trajectories=cleaned_trajectories,
+        stakes_summary=stakes_summary,
+        prediction=prediction,
+        validation_details=validation_details,
+    )

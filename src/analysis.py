@@ -2,6 +2,93 @@ import pandas as pd
 import numpy as np
 
 
+def build_prediction_status(df, monitoring_df, displacements):
+    if df.empty:
+        return pd.DataFrame(columns=[
+            "stake_id",
+            "prediction_status",
+            "prediction_status_detail",
+        ])
+
+    latest_measurements = (
+        df.sort_values(["date", "source_order"])
+        .groupby("stake_id")
+        .last()
+        .reset_index()[["stake_id", "date", "source_order"]]
+        .rename(columns={"date": "last_measurement_date"})
+    )
+
+    points_per_stake = (
+        df.groupby("stake_id")
+        .size()
+        .rename("n_points")
+        .reset_index()
+    )
+
+    valid_segments = (
+        displacements.groupby("stake_id")
+        .size()
+        .rename("valid_segments")
+        .reset_index()
+        if not displacements.empty
+        else pd.DataFrame(columns=["stake_id", "valid_segments"])
+    )
+
+    status = latest_measurements.merge(points_per_stake, on="stake_id", how="left")
+    status = status.merge(valid_segments, on="stake_id", how="left")
+    status["valid_segments"] = status["valid_segments"].fillna(0).astype(int)
+    status["prediction_status"] = "predicted"
+    status["prediction_status_detail"] = ""
+
+    latest_source_order = df["source_order"].max()
+
+    if monitoring_df is not None and not monitoring_df.empty:
+        lost_events = monitoring_df[monitoring_df["is_lost"]].copy()
+        if not lost_events.empty:
+            lost_events = (
+                lost_events.sort_values(["source_order", "date"])
+                .groupby("stake_id")
+                .first()
+                .reset_index()[["stake_id", "source_order", "gps_comment", "source_file"]]
+                .rename(
+                    columns={
+                        "source_order": "lost_source_order",
+                        "gps_comment": "lost_comment",
+                        "source_file": "lost_source_file",
+                    }
+                )
+            )
+            status = status.merge(lost_events, on="stake_id", how="left")
+            lost_mask = status["lost_source_order"].notna() & (
+                status["lost_source_order"] >= status["source_order"]
+            )
+            status.loc[lost_mask, "prediction_status"] = "unpredicted"
+            status.loc[lost_mask, "prediction_status_detail"] = "lost"
+
+    not_monitored_mask = (
+        status["prediction_status"].eq("predicted")
+        & (status["source_order"] < latest_source_order)
+    )
+    status.loc[not_monitored_mask, "prediction_status"] = "unpredicted"
+    status.loc[not_monitored_mask, "prediction_status_detail"] = "not anymore monitored"
+
+    one_point_mask = (
+        status["prediction_status"].eq("predicted")
+        & status["n_points"].eq(1)
+    )
+    status.loc[one_point_mask, "prediction_status"] = "unpredicted"
+    status.loc[one_point_mask, "prediction_status_detail"] = "single measurement"
+
+    no_segments_mask = (
+        status["prediction_status"].eq("predicted")
+        & status["valid_segments"].lt(2)
+    )
+    status.loc[no_segments_mask, "prediction_status"] = "unpredicted"
+    status.loc[no_segments_mask, "prediction_status_detail"] = "single measurement"
+
+    return status[["stake_id", "prediction_status", "prediction_status_detail"]]
+
+
 def estimate_velocity_components(
     stake_segments,
 ):
@@ -159,7 +246,7 @@ def compute_campaign_summary(df):
     return pd.DataFrame(rows).sort_values(["stake_id", "campaign"])
 
 # Predict future position using the same shared velocity logic as the summary
-def compute_prediction(df, displacements, target_date):
+def compute_prediction(df, displacements, target_date, monitoring_df=None):
 
     last_positions = (
         df.sort_values("date")
@@ -172,9 +259,15 @@ def compute_prediction(df, displacements, target_date):
     last_positions["delta_t_days"] = (
         pd.to_datetime(target_date) - last_positions["date"]
     ).dt.days
+    status_df = build_prediction_status(df, monitoring_df, displacements)
+    status_map = status_df.set_index("stake_id").to_dict("index")
 
     rows = []
     for row in last_positions.itertuples(index=False):
+        status = status_map.get(row.stake_id, {})
+        prediction_status = status.get("prediction_status", "predicted")
+        prediction_status_detail = status.get("prediction_status_detail", "")
+
         stake_segments = displacements[
             (displacements["stake_id"] == row.stake_id) & (displacements["date_end"] <= row.date)
         ].sort_values("date_end")
@@ -183,8 +276,12 @@ def compute_prediction(df, displacements, target_date):
             stake_segments=stake_segments,
         )
 
-        x_pred = row.x + vx_est * row.delta_t_days if pd.notna(vx_est) else np.nan
-        y_pred = row.y + vy_est * row.delta_t_days if pd.notna(vy_est) else np.nan
+        x_pred = np.nan
+        y_pred = np.nan
+        if prediction_status == "predicted" and pd.notna(vx_est) and pd.notna(vy_est):
+            x_pred = row.x + vx_est * row.delta_t_days
+            y_pred = row.y + vy_est * row.delta_t_days
+
         delta_x = x_pred - row.x if pd.notna(x_pred) else np.nan
         delta_y = y_pred - row.y if pd.notna(y_pred) else np.nan
 
@@ -201,6 +298,8 @@ def compute_prediction(df, displacements, target_date):
             "delta_y": delta_y,
             "vx_est": vx_est,
             "vy_est": vy_est,
+            "prediction_status": prediction_status,
+            "prediction_status_detail": prediction_status_detail,
         })
 
     return pd.DataFrame(rows)

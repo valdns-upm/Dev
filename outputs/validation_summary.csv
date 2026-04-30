@@ -1,0 +1,2 @@
+n_stakes,mean_abs_err_x_m,mean_abs_err_y_m,mean_err_dist_m,rmse_dist_m,median_err_dist_m
+57,0.528,0.521,0.81,1.705,0.41
